@@ -1,6 +1,12 @@
 import sqlite3
 import pandas as pd
 import numpy as np
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+# Transformers Model
+model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # DB config
 conn = sqlite3.connect("dataset/reddit-comments-may-2015/database.sqlite")
@@ -31,8 +37,16 @@ filter_short_comms['repeat_count'] = filter_short_comms['body'].map(filter_short
 ## Filtering all comments that have more than 15 words and repeats more than once
 filter_bots = filter_short_comms[~((filter_short_comms['repeat_count'] > 1) & (filter_short_comms['words_count'] > 15))]
 
-print("Number of rows before removing bots:", len(filter_short_comms))
-print("Number of rows after removing bots:", len(filter_bots))
+# Generating embeddings for cleaned comments
+comments = filter_bots['body'].tolist()
+embeddings = model.encode(comments)
+
+# Saving embeddings and comments to disk, so we don't need to recompute them every run
+np.save("sample/embeddings.npy", embeddings)
+
+# CSV rows must be in same sequence as embeddings
+filter_bots.to_csv("sample/cleaned_comments.csv", index=False)
+
 
 cursor.close()
 conn.close()
