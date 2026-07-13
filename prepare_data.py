@@ -1,12 +1,14 @@
 import sqlite3
 import pandas as pd
 import numpy as np
+from langdetect import detect
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 
 # Transformers Model
-model = SentenceTransformer('all-MiniLM-L6-v2')
+model = SentenceTransformer('all-distilroberta-v1')
+
 
 # DB config
 conn = sqlite3.connect("dataset/reddit-comments-may-2015/database.sqlite")
@@ -37,15 +39,44 @@ filter_short_comms['repeat_count'] = filter_short_comms['body'].map(filter_short
 ## Filtering all comments that have more than 15 words and repeats more than once
 filter_bots = filter_short_comms[~((filter_short_comms['repeat_count'] > 1) & (filter_short_comms['words_count'] > 15))]
 
-# Generating embeddings for cleaned comments
-comments = filter_bots['body'].tolist()
-embeddings = model.encode(comments)
+# Additional bot cleaning technique
+bot_phrases = [
+    "i am a bot",
+    "automatically removed",
+    "topic flair",
+    "learn more at",
+]
 
+def contains_bot_phrase(text, phrases):
+    text_lower = text.lower()
+    return any(phrase in text_lower for phrase in phrases)
+
+filter_bots['is_bot_phrase'] = filter_bots['body'].apply(lambda x: contains_bot_phrase(x, bot_phrases))
+filter_bots_clean = filter_bots[~filter_bots['is_bot_phrase']]
+# ======================================
+
+
+# Leaving only Eng comments
+def safe_detect(text):
+    try:
+        return detect(text)
+    except:
+        return "unknown"
+
+filter_bots_clean['language'] = filter_bots_clean['body'].apply(safe_detect)
+filter_english = filter_bots_clean[filter_bots_clean['language'] == 'en']
+# =====================================
+
+# Convertion to list from dataframe
+comments = filter_english['body'].tolist()
+
+# Generating embeddings for cleaned comments
+embeddings = model.encode(comments, show_progress_bar=True)
 # Saving embeddings and comments to disk, so we don't need to recompute them every run
 np.save("sample/embeddings.npy", embeddings)
 
 # CSV rows must be in same sequence as embeddings
-filter_bots.to_csv("sample/cleaned_comments.csv", index=False)
+filter_english.to_csv("sample/cleaned_comments.csv", index=False)
 
 
 cursor.close()
